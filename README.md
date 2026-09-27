@@ -30,35 +30,49 @@ the underwriting process.
 ## Architecture
 
 ```
-Frontend (React + Vite)
+Analyst Input (3 modes)
 │
-└── POST /v1/analyze ──────────────────────────────────── FastAPI (main.py)
-                                                               │
-                          ┌────────────────────────────────────┤
-                          │                                    │
-                   agents.py                          profiles.py
-                   ├── HTML/PDF → text                ├── Company profiles
-                   ├── Section finding                ├── Correction store
-                   ├── GPT-4o extraction              ├── Rule injection
-                   ├── Claude MD&A analysis           └── auto_rule.py
-                   ├── Revolver/lease parsing                  │
-                   └── validate_and_compute()         pattern_miner.py
-                          │                           (cross-company learning)
-                   metrics.py
-                   ├── compute_ebitda()
-                   ├── compute_fcc()
-                   ├── compute_leverage()
-                   └── compute_altman_z()
+├── Company name search ────────────────────────────── edgar_client.py
+│   GET /v1/edgar/search                               ├── SEC EDGAR company registry
+│   GET /v1/edgar/{cik}/filings                        ├── Submissions API
+│   POST /v1/analyze/edgar                             └── Filing document fetch
+│
+├── File upload ─────────────────────────────────────── main.py (file_to_text)
+│   POST /v1/analyze                                    ├── PDF parser (pypdf)
+│                                                       └── HTML parser (BeautifulSoup)
+│
+└── URL paste
+    POST /v1/analyze/url ──────────────────────────── filing_fetcher.py
+                                                        └── HTTP fetch + same pipeline
                           │
-              ┌───────────┴───────────┐
-              │                       │
-       doc_builder.py         segment_parser.py
-       (Excel via openpyxl)   (Claude → segment JSON)
-                                       │
-                              build_narrative_doc_v2.js
-                              (Word via Node.js/docx)
-                                       │
-                              run_store.py (SQLite)
+                          ▼
+                   FastAPI (main.py)
+                          │
+            ┌─────────────┼─────────────┐
+            │             │             │
+       agents.py    profiles.py    run_store.py
+       ├── Section    ├── Corrections  ├── SQLite cache
+       │   finding    ├── Rule inject  └── Export store
+       ├── GPT-4o     └── auto_rule.py
+       │   extraction
+       ├── Claude
+       │   MD&A
+       └── validate_
+           and_compute()
+                │
+           metrics.py
+           ├── compute_ebitda()
+           ├── compute_fcc()
+           ├── compute_leverage()
+           └── compute_altman_z()
+                │
+     ┌──────────┴──────────┐
+     │                     │
+doc_builder.py      segment_parser.py
+(Excel/openpyxl)    (Claude → JSON)
+                           │
+                  build_narrative_doc_v2.js
+                  (Word via Node.js/docx)
 ```
 
 ---
