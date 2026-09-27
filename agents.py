@@ -85,18 +85,8 @@ def _call_claude_with_retry(client, **kwargs) -> str:
 # HTML STRIPPING
 # ============================================================
 
-# ── HTML stripping ────────────────────────────────────────────────────────────
-# 10-K filings from EDGAR arrive as HTML with thousands of tags, inline XBRL
-# annotations, and JavaScript. This function strips all markup and converts
-# tables to pipe-delimited rows that GPT-4o can read as financial data.
-#
-# Table structure is preserved: </tr> becomes a newline, </td> becomes a tab.
-# This means "Net sales | 5,200 | 4,800" reads as a three-column row with
-# revenue figures for two fiscal years — critical for multi-period extraction.
-#
-# HTML entities (&nbsp;, &#160;, &#8212; etc.) are decoded to Unicode.
-# Output is typically 80-90% smaller than the input HTML.
-def _strip_html_to_text(raw: str) -> str:def _strip_html_to_text(raw: str) -> str:
+# Strips HTML, converts tables to pipe-delimited rows.
+def _strip_html_to_text(raw: str) -> str:
     if not raw or not raw.strip():
         return raw
     if "<html" not in raw.lower() and "<span" not in raw.lower():
@@ -160,25 +150,7 @@ EXPECTED_CF_KEYS = [
     "cash_paid_for_income_taxes", "dividends_distributions_paid",
 ]
 
-# ── GPT-4o extraction prompt ─────────────────────────────────────────────────
-# The system prompt contains hard rules refined from systematic extraction failures:
-#
-# MULTI-PERIOD RULE: GPT-4o was returning only one period when filings showed
-# three years of columns. The prompt now explicitly explains pipe-separated tables
-# and requires one period object per fiscal year column shown.
-#
-# CASH TAXES RULE: Companies report taxes twice — on the income statement (accrual,
-# not cash) and in supplemental cash flow disclosures (actual cash paid). GPT-4o
-# kept picking up the income statement figure. The prompt now explicitly requires
-# the supplemental cash flow total only.
-#
-# ZERO DEFAULT RULE: current_portion_long_term_debt and revolver_borrowings should
-# be 0 (not null) when absent — a missing line means the value is genuinely zero,
-# not that we couldn't find it. All other fields default to null when not found.
-#
-# The schema prompt defines the exact JSON structure GPT-4o must return.
-# _coerce_json and _normalize_payload fix malformed responses and enforce types.
-EXTRACTOR_SYSTEM_PROMPT = """EXTRACTOR_SYSTEM_PROMPT = """
+EXTRACTOR_SYSTEM_PROMPT = """
 You are a financial statement extraction assistant for a commercial credit analyst.
 Return ONLY valid JSON. No extra commentary.
 
@@ -332,29 +304,7 @@ def _normalize_payload(data: dict) -> dict:
 # MD&A SECTION EXTRACTION (TOC-aware)
 # ============================================================
 
-# ── MD&A section extraction ───────────────────────────────────────────────────
-# The MD&A (Management's Discussion & Analysis) is Item 7 of a 10-K.
-# It explains WHY the numbers changed — which segments grew, what drove margins,
-# what headwinds were offset by tailwinds. This is what makes the output
-# different from any data terminal.
-#
-# Finding Item 7 is harder than it sounds:
-#   - The Table of Contents also contains "ITEM 7. MANAGEMENT'S DISCUSSION..."
-#     and must be skipped to find the actual section
-#   - Different companies format the header differently
-#
-# Search strategy (three passes):
-#   Pass 1: Standard "ITEM 7." patterns with TOC detection
-#   Pass 2: Broader patterns like "RESULTS OF OPERATIONS"
-#   Pass 3: Last 40% of document as a last-resort fallback
-#
-# TOC detection: if we find "ITEM 7." but the surrounding 2000 chars contain
-# 5+ other "ITEM X." references, it's the Table of Contents — skip it.
-#
-# After finding the start, the preamble (boilerplate before actual results)
-# is trimmed by advancing to the first line containing financial signal words
-# like "NET SALES" or "REVENUE DECREASED".
-def _extract_mda_section(raw_text: str, max_chars: int = 350000) -> str:def _extract_mda_section(raw_text: str, max_chars: int = 350000) -> str:
+def _extract_mda_section(raw_text: str, max_chars: int = 350000) -> str:
     if not raw_text: return ""
     upper = raw_text.upper()
     doc_len = len(raw_text)
@@ -467,28 +417,7 @@ def _extract_mda_section(raw_text: str, max_chars: int = 350000) -> str:def _ext
 # MD&A SUMMARISATION — Claude with retry
 # ============================================================
 
-# ── MD&A analysis with Claude Sonnet ─────────────────────────────────────────
-# After extracting the MD&A text, this function sends it to Claude Sonnet
-# for a structured segment-by-segment performance analysis.
-#
-# WHY CLAUDE INSTEAD OF GPT-4O:
-# Claude produces more coherent analyst-quality prose for narrative analysis
-# and handles the long MD&A text (up to 80,000 chars) better than GPT-4o.
-#
-# The prompt asks Claude to:
-#   1. Identify every business segment mentioned
-#   2. For each segment: extract revenue, COGS, gross margin YoY
-#   3. Identify specific drivers (volume, price, mix, new products, geography)
-#   4. Identify offsetting factors
-#   5. Write cross-segment themes
-#
-# Output is formatted into structured markdown by _format_mda_summary
-# and displayed in the MD&A Analysis tab in the frontend.
-#
-# Rate limiting: MD&A text is capped at 80,000 chars (MDA_CHAR_LIMIT env var).
-# Retry logic handles transient rate limit errors with exponential backoff
-# (0s, 60s, 120s between attempts — max 3 attempts total).
-def _summarize_mda_for_drivers(mda_text: str, extracted: ExtractionResult) -> str:def _summarize_mda_for_drivers(mda_text: str, extracted: ExtractionResult) -> str:
+def _summarize_mda_for_drivers(mda_text: str, extracted: ExtractionResult) -> str:
     if not mda_text or not mda_text.strip():
         return "No MD&A section found."
     if not extracted.periods:
@@ -742,22 +671,7 @@ def _format_memo_markdown(raw: str) -> str:
 # LEASE DATA EXTRACTION
 # ============================================================
 
-# ── Lease expense extraction ──────────────────────────────────────────────────
-# Operating lease cost does NOT appear in the main income statement for most
-# companies post-ASC 842 (2019 lease accounting standard). Instead, it lives
-# in a "LEASES" footnote in the Notes to Financial Statements.
-#
-# This function:
-#   1. Finds the Notes section (after the financial statements)
-#   2. Finds the LEASES footnote
-#   3. Calls GPT-4o-mini to extract the lease cost table
-#
-# WHY GPT-4O-MINI: The lease footnote is a simple structured table.
-# GPT-4o-mini handles it well at ~$0.05 vs ~$0.50 for GPT-4o.
-#
-# The extracted operating_lease_cost is added back into EBITDA as rent expense,
-# creating a lease-adjusted EBITDAR which is common in lease-heavy industries.
-def extract_lease_data(raw_text: str, period_names: list[str]) -> dict:def extract_lease_data(raw_text: str, period_names: list[str]) -> dict:
+def extract_lease_data(raw_text: str, period_names: list[str]) -> dict:
     if not raw_text or not period_names: return {}
     upper = raw_text.upper()
     TOC_SIGNALS = ["ITEM 7A.", "ITEM 8.", "ITEM 9.", "ITEM 10.",
@@ -830,23 +744,6 @@ def calculate_adjusted_rent_expense(
 # REVOLVER EXTRACTION
 # ============================================================
 
-# ── Revolver extraction with Claude Sonnet ────────────────────────────────────
-# Revolving credit facility data (facility size, borrowings, availability)
-# is critical for liquidity analysis but appears in inconsistent formats:
-#   - Structured table in the debt footnote
-#   - Plain English prose paragraphs
-#   - Combined with term loans and other facilities
-#
-# SEARCH STRATEGY (4 passes, each a fallback if the previous fails):
-#   Pass 1: NOTE header regex matching "NOTE X. LONG-TERM DEBT"
-#   Pass 2: Extended NOTE header patterns for less-standard formats
-#   Pass 3: Keyword search for "REVOLVING CREDIT FACILITY" past the TOC
-#   Pass 4: Prose search for "$X billion revolving credit facility" in plain text
-#           — handles filings where the revolver is described narratively
-#
-# WHY CLAUDE: The revolver appears in prose, tables, or a mix of both.
-# Claude handles unstructured prose better and the prompt includes concrete
-# examples of both table and prose formats with expected JSON output.
 def extract_revolver_data(raw_text: str, period_names: list[str]) -> dict:
     """
     Extract revolving credit facility data from 10-K debt notes.
@@ -1024,22 +921,7 @@ Use null only if a value genuinely cannot be determined."""
 # FINANCIAL STATEMENTS TEXT SELECTION
 # ============================================================
 
-# ── Financial statement text selection ────────────────────────────────────────
-# A full 10-K runs 200-400 pages. Sending everything to GPT-4o would cost $5-10
-# and actually reduce accuracy — the model attends better to focused inputs.
-#
-# This function finds the start of the financial statements section
-# (typically "CONSOLIDATED STATEMENTS OF INCOME") and extracts a
-# 260,000-character window from that point forward, covering the statements
-# and all footnotes.
-#
-# SEARCH STRATEGY:
-#   Tier 1: Full statement headers like "CONSOLIDATED STATEMENTS OF INCOME"
-#   Tier 2: Broader markers like "FINANCIAL STATEMENTS" as fallback
-#
-# Each candidate is verified to contain financial signal words (NET SALES,
-# TOTAL ASSETS, etc.) to avoid false positives in the Table of Contents.
-def _select_relevant_statement_text(raw_text: str, max_chars: int = 260000) -> str:def _select_relevant_statement_text(raw_text: str, max_chars: int = 260000) -> str:
+def _select_relevant_statement_text(raw_text: str, max_chars: int = 260000) -> str:
     if not raw_text: return ""
     upper = raw_text.upper()
     FS_SIGNALS = [
@@ -1089,22 +971,6 @@ def _extract_tables_block(text: str, max_chars: int = 160000) -> str:
     return "" if idx == -1 else text[idx: idx + max_chars]
 
 
-# ── Numeric excerpt ───────────────────────────────────────────────────────────
-# Further filters the financial statements section to only lines containing
-# financial amounts, plus a small context window around each match.
-#
-# WHY KEEP CONTEXT LINES:
-# A line containing "5,200" by itself means nothing. The line before it —
-# "Net sales" — defines what the number is. context_lines=2 keeps the label.
-#
-# WHY KEEP YEAR HEADER ROWS:
-# Lines like "2024 | 2023 | 2022" are column headers that tell GPT-4o which
-# number belongs to which fiscal year. Without them, multi-period extraction
-# would fail — the model wouldn't know that the first number is FY2024.
-# These rows are kept even if they contain no dollar amounts.
-#
-# Reduces input from ~260,000 to ~130,000 chars while preserving all
-# financially meaningful content. Saves ~$0.50 per run in token costs.
 def _numeric_excerpt(text: str, max_chars: int = 130000, context_lines: int = 2) -> str:
     """
     Extract lines containing financial amounts plus surrounding context.
@@ -1136,42 +1002,7 @@ class _extract_profile_context:
     company_name = None
 
 
-# ── Main extraction entry point ───────────────────────────────────────────────
-# Every analysis — file upload, EDGAR search, URL paste — flows through here.
-#
-# STEP-BY-STEP:
-#
-# 1. PREP: Strip HTML, select the financial statements section, build the
-#    numeric excerpt and tables block, combine into the GPT-4o input.
-#
-# 2. RULES INJECTION: If the company has saved extraction rules in the
-#    profile system (from Review & Correct), inject them into the prompt.
-#    These override the general aliases for this specific company.
-#    Example: "For CHD, rent_expense: look for 'Operating lease cost'
-#    in the LEASES section. Ignore 'Total lease cost'."
-#
-# 3. GPT-4O CALL: Returns a JSON object with one period per fiscal year column.
-#    _normalize_payload validates and coerces all values to the right types.
-#
-# 4. CONTEXT RECORDING: For each extracted numeric value, find where in the
-#    original document it came from. Stored as a structured note on the period.
-#    Powers the "Show where it was found" display in Review & Correct.
-#
-# 5. LEASE EXTRACTION: Separate GPT-4o-mini call to the lease footnote.
-#    Merged into income_statement["rent_expense"].
-#
-# 6. REVOLVER EXTRACTION: Separate Claude call to the debt footnotes.
-#    Merged into balance_sheet (facility_size, borrowings, availability).
-#
-# 7. CASH TAXES FALLBACK: If any period still has null cash_paid_for_income_taxes
-#    after the main extraction, try the 3M-style footnote table format.
-#
-# 8. MD&A: Extract Item 7, send to Claude Sonnet for segment analysis.
-#
-# 9. PROFILE: Apply saved corrections, flag remaining conflicts.
-#
-# Returns (ExtractionResult, excerpt_text, raw_gpt_response, mda_summary)
-def extract_financials_from_text(raw_text: str) -> Tuple[ExtractionResult, str, str, str]:def extract_financials_from_text(raw_text: str) -> Tuple[ExtractionResult, str, str, str]:
+def extract_financials_from_text(raw_text: str) -> Tuple[ExtractionResult, str, str, str]:
     raw_text = _strip_html_to_text(raw_text)
     selected = _select_relevant_statement_text(raw_text, max_chars=260000)
     tables_block = _extract_tables_block(selected, max_chars=200000)
@@ -1486,34 +1317,7 @@ def _extract_cash_taxes_from_footnote(raw_text: str, period_names: list[str]) ->
 # COMPUTATIONS
 # ============================================================
 
-# ── Deterministic credit metric computation ───────────────────────────────────
-# After GPT-4o extracts the raw financials, this function computes all
-# credit metrics in pure Python — no LLM, no randomness, fully reproducible.
-#
-# WHY DETERMINISTIC:
-# Credit decisions must be auditable. EBITDA, FCC, and leverage must give
-# the same answer every time for the same inputs. These cannot be delegated
-# to an LLM that might round differently each run.
-#
-# COMPUTED FOR EACH PERIOD:
-#   ebitda_computed  = operating_income + D&A + rent_expense
-#   free_cash_flow   = CFO - |capex|
-#   ebitda_margin    = EBITDA / revenue
-#   fcc              = (EBITDA - |capex| - |cash_taxes|) / (CPLTD + |cash_interest|)
-#   leverage         = total_debt / EBITDA
-#   altman_z_score   = weighted distress formula (assets, equity, earnings, revenue)
-#   pd_score (1-12)  = derived from leverage, FCC, margin, Z-score, revenue growth
-#   revenue_growth   = (current - prior) / prior (requires 2+ periods)
-#
-# VALIDATION FLAGS:
-# When a component is missing (e.g. no total_debt = can't compute leverage),
-# a human-readable warning is added to validation_flags. These appear as
-# yellow warning banners in the frontend and are listed in the memo.
-#
-# EBITDA WRITEBACK: The computed EBITDA is written back into
-# income_statement["ebitda"] so it's available everywhere the income
-# statement is used (exports, memo, Review & Correct display).
-def validate_and_compute(result: ExtractionResult) -> ExtractionResult:def validate_and_compute(result: ExtractionResult) -> ExtractionResult:
+def validate_and_compute(result: ExtractionResult) -> ExtractionResult:
     flags: list[str] = []
     for p in result.periods:
         p.income_statement = dict(p.income_statement or {})

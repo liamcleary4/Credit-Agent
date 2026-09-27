@@ -348,18 +348,8 @@ async def analyze_single(
         cached = None if cache_bypass else store.find_completed_by_file_sha(file_sha)
 
         # ── Cache path ───────────────────────────────────────────────────
-        # ── Cache hit ─────────────────────────────────────────────────────────
-        # The same file was analysed before. Return the stored extraction
-        # immediately rather than re-spending $2 and 90 seconds on GPT-4o.
-        #
-        # We still regenerate the memo with the current borrower context,
-        # because the analyst may have entered different company name /
-        # industry / covenants this time. The memo is cheap to regenerate
-        # (no extraction LLM call needed — we already have the numbers).
-        #
-        # We also re-run validate_and_compute() in case the metric formulas
-        # were updated since the original run was cached.
-        if cached and cached.extracted_json:        if cached and cached.extracted_json:
+        # Cache hit: skip extraction, regenerate memo with current borrower context.
+        if cached and cached.extracted_json:
             extracted = ExtractionResult.model_validate(cached.extracted_json)
             extracted = validate_and_compute(extracted)
 
@@ -415,18 +405,7 @@ async def analyze_single(
                 len(extracted.periods or []), run_id,
             )
 
-        # ── Fresh extraction path ─────────────────────────────────────────────
-        # Cache miss — this file hasn't been analysed before (or cache_bypass=true).
-        # Run the full pipeline: parse → extract → compute → memo → store.
-        #
-        # SOFT GATE: If completeness < 0.55, a warning block is prepended to
-        # the memo. We still return results — partial data is more useful than
-        # an error, and the analyst can correct missing values in Review & Correct.
-        #
-        # HARD GATE: If the text contains no financial amounts at all
-        # (e.g. a scanned PDF that needs OCR first), we fail fast with a
-        # clear error message rather than wasting $2 on an empty extraction.
-        # ── Fresh extraction path ────────────────────────────────────────        # ── Fresh extraction path ────────────────────────────────────────
+        # ── Fresh extraction path ────────────────────────────────────────
         store.set_running(run_id)
 
         text = file_to_text(file_bytes, file.filename)
