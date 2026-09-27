@@ -19,3 +19,11 @@ extraction_hints.json
 *.xlsx
 patch_main_edgar.py
 apply_annotations.py
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.docx
+*.xlsx
+patch_main_edgar.py
+apply_annotations.py
+fix_readme.py

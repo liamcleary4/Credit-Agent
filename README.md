@@ -151,6 +151,8 @@ The extractor improves over time through three layers:
 
 ---
 
+---
+
 ## Testing
 
 ```bash
@@ -162,16 +164,18 @@ pytest tests/test_metrics.py -v
 
 ---
 
-    """## Environment variables
+## Environment variables
 
 Set these in Railway (production) or a local `.env` file (development). Never commit actual values to git.
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | Yes | OpenAI API key — used for financial extraction and memo generation |
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key — used for MD&A analysis and segment parsing |
-| `ACCESS_CODE` | Recommended | Password gate for the frontend demo |"""
-)
+| `OPENAI_API_KEY` | Yes | OpenAI API key used for financial extraction and memo generation |
+| `ANTHROPIC_API_KEY` | Yes | Anthropic API key used for MD&A analysis and segment parsing |
+| `ACCESS_CODE` | Recommended | Password gate for the frontend demo |
 
-# reconnected
+---
 
+## Live demo
+
+[credit-ai-frontend.vercel.app](https://credit-ai-frontend.vercel.app) — request access code from [Liam Cleary](mailto:ljcleary4@gmail.com)
