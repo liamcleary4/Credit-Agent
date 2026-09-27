@@ -7,6 +7,8 @@ structured financial data, credit metrics, and a full underwriting memo in under
 Built for commercial credit analysts to eliminate manual spreading and accelerate
 the underwriting process.
 
+**Live demo:** [credit-ai-frontend.vercel.app](https://credit-ai-frontend.vercel.app) — contact [ljcleary4@gmail.com](mailto:ljcleary4@gmail.com) to request access
+
 ---
 
 ## What it does
