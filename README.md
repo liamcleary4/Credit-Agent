@@ -73,7 +73,7 @@ Frontend (React + Vite)
 | Document generation | openpyxl (Excel), Node.js + docx (Word) |
 | Persistence | SQLite (WAL mode) |
 | Frontend | React 18, Vite, ReactMarkdown |
-| Testing | pytest (67 tests) |
+| Testing | pytest (68 tests) |
 
 ---
 
@@ -122,7 +122,7 @@ npm run dev          # runs on localhost:3000
 | `segment_parser.py` | MD&A → structured segment JSON |
 | `build_narrative_doc_v2.js` | Word document builder |
 | `run_store.py` | SQLite persistence with schema migration |
-| `tests/test_metrics.py` | 67-test pytest suite |
+| `tests/test_metrics.py` | 68-test pytest suite |
 
 ---
 
@@ -143,11 +143,10 @@ npm run dev          # runs on localhost:3000
 
 ## Learning system
 
-The extractor improves over time through three layers:
+The extractor improves over time through two layers:
 
-1. **Company profiles** — analyst corrections saved per company, applied on every future run
-2. **Auto-rule generation** — when an analyst corrects a value, Claude analyses the filing context and suggests a precise extraction rule (where to look) for approval
-3. **Cross-company pattern mining** — `pattern_miner.py` analyses corrections across all companies to find systematic mistakes and generates general guidance injected into the base extraction prompt
+1. **Company profiles** — analyst corrections saved per company, applied automatically on every future run for that company
+2. **Auto-rule generation** — when an analyst corrects a value, Claude analyses where the extractor originally found the wrong number and suggests a precise extraction rule for approval. Approved rules are injected into the GPT-4o prompt on the next run so the extractor finds the right number dynamically rather than relying on a hardcoded value
 
 ---
 
@@ -160,7 +159,7 @@ cd credit-ai-backend
 pytest tests/test_metrics.py -v
 ```
 
-67 tests covering all credit metric functions, sign convention handling, None propagation, covenant breach detection, and a full realistic CHD scenario.
+68 tests covering all credit metric functions, sign convention handling, None propagation, covenant breach detection, and a full realistic CHD scenario.
 
 ---
 
